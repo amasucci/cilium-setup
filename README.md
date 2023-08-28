@@ -39,6 +39,21 @@ global:
     enabled: true
     nodeEncryption: true
 
+ingressController:
+  enabled: enabled
+  loadbalancerMode: shared
+
+nodePort:
+  enabled: true
+
+l7Proxy: true
+
+loadbalancer:
+  l7:
+    backend: envoy
+envoy:
+  enabled: true
+
 hubble:
   metrics:
     #serviceMonitor:
@@ -85,3 +100,58 @@ prometheus:
   # Default port value (9090) needs to be changed since the RHEL cockpit also listens on this port.
   port: 19090
 ```
+
+This enables the cilium ingress controller. The ingress controller required a loadbalancer controller for this reason we are going to create one using metallb:
+
+```bash
+$ kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.10.2/manifests/namespace.yaml
+$ kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.10.2/manifests/metallb.yaml
+```
+
+Now we need to configure metal lb with a config map where we specify which ip addresses are available to the service type `LoadBalancer`
+
+In our case (single node cluster):
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: metallb-system
+  name: config
+data:
+  config: |
+    address-pools:
+    - name: default
+      protocol: layer2
+      addresses:
+      - 10.0.0.92-10.0.0.92
+```
+
+Install cert manager:
+
+`kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.yaml`
+
+Create a certificate issuer:
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    # The ACME server URL
+    server: https://acme-v02.api.letsencrypt.org/directory
+    # Email address used for ACME registration
+    email: eng.masucci@gmail.com
+    # Name of a secret used to store the ACME account private key
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    # Enable the HTTP-01 challenge provider
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: cilium
+```
+
+
